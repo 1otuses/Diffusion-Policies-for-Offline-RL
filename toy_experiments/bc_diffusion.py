@@ -24,9 +24,9 @@ class MLP(nn.Module):
         self.device = device
 
         self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(t_dim),
+            SinusoidalPosEmb(t_dim),  # 将时间编码融入
             nn.Linear(t_dim, t_dim * 2),
-            nn.Mish(),
+            nn.Mish(),  # 激活函数
             nn.Linear(t_dim * 2, t_dim),
         )
 
@@ -64,11 +64,11 @@ class BC(object):
                  hidden_dim=32,
                  ):
 
-        
+        # 噪声预测网络$\epsilon$
         self.model = MLP(state_dim=state_dim, action_dim=action_dim, device=device,
                          t_dim=4, hidden_dim=hidden_dim)
         
-
+        # 扩散模型执行动作采样
         self.actor = Diffusion(state_dim=state_dim, action_dim=action_dim, model=self.model, max_action=max_action,
                                beta_schedule=beta_schedule, n_timesteps=n_timesteps,
                                ).to(device)
@@ -85,7 +85,7 @@ class BC(object):
         for it in range(iterations):
             # Sample replay buffer / batch
             state, action, reward = replay_buffer.sample(batch_size)
-
+            # 计算Diffusion损失
             loss = self.actor.loss(action, state)
 
             self.actor_optimizer.zero_grad()

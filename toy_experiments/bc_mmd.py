@@ -11,7 +11,7 @@ LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
 
 
-def atanh(x):
+def atanh(x):  # 反双曲正切函数：用于将tanh(x)还原回x
     one_plus_x = (1 + x).clamp(min=1e-7)
     one_minus_x = (1 - x).clamp(min=1e-7)
     return 0.5*torch.log(one_plus_x/ one_minus_x)
@@ -59,11 +59,14 @@ class VAE(nn.Module):
         return self.max_action * torch.tanh(self.d3(a))
 
     def decode_multiple(self, state, z=None, num_decode=10):
+        # 为同一批状态解码生成10个动作样本.
         """Decode 10 samples atleast"""
         if z is None:
             z = torch.FloatTensor(np.random.normal(0, 1, size=(state.size(0), num_decode, self.latent_dim))).to(
                 self.device).clamp(-0.5, 0.5)
-
+        # state.unsqueeze(0):(1,Batch,state_size)
+        # .repeat():(num_decode,Batch,state_size)
+        # .permute(1,0,2):(Batch,num_decode,state_size)
         a = F.relu(self.d1(torch.cat([state.unsqueeze(0).repeat(num_decode, 1, 1).permute(1, 0, 2), z], 2)))
         a = F.relu(self.d2(a))
         return self.max_action * torch.tanh(self.d3(a)), self.d3(a)
@@ -167,12 +170,13 @@ class BC_MMD(object):
     def mmd_loss_laplacian(self, samples1, samples2, sigma=0.2):
         """MMD constraint with Laplacian kernel for support matching"""
         # sigma is set to 10.0 for hopper, cheetah and 20 for walker/ant
+        # 计算样本x的内部差异
         diff_x_x = samples1.unsqueeze(2) - samples1.unsqueeze(1)  # B x N x N x d
         diff_x_x = torch.mean((-(diff_x_x.abs()).sum(-1) / (2.0 * sigma)).exp(), dim=(1, 2))
-
+        # 计算样本x、y的差异
         diff_x_y = samples1.unsqueeze(2) - samples2.unsqueeze(1)
         diff_x_y = torch.mean((-(diff_x_y.abs()).sum(-1) / (2.0 * sigma)).exp(), dim=(1, 2))
-
+        # 计算样本y的内部差异
         diff_y_y = samples2.unsqueeze(2) - samples2.unsqueeze(1)  # B x N x N x d
         diff_y_y = torch.mean((-(diff_y_y.abs()).sum(-1) / (2.0 * sigma)).exp(), dim=(1, 2))
 

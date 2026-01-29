@@ -5,6 +5,7 @@ from torch.distributions import Normal
 import seaborn as sns
 import matplotlib.pyplot as plt
 import argparse
+from tqdm import tqdm, trange
 
 from toy_experiments.toy_helpers import Data_Sampler
 
@@ -32,7 +33,7 @@ lr = args.lr
 hidden_dim = args.hidden_dim
 
 
-def generate_data(num, device='cpu'):
+def generate_data(num, device = 'cpu'):
     
     each_num = int(num / 4)
     pos = 0.8
@@ -52,7 +53,7 @@ def generate_data(num, device='cpu'):
     action = data
     state = torch.zeros_like(action)
     
-    r_left_up = 3.0 + 0.5 * torch.randn((each_num, 1))
+    r_left_up = 3.0 + 0.5 * torch.randn((each_num, 1))  # 与toy_bc 不同,奖励设为高低,实验以证明：奖励的大小可以指导策略的更新和优化
     r_left_bottom = 0.5 * torch.randn((each_num, 1))
     r_right_up = 1.5 + 0.5 * torch.randn((each_num, 1))
     r_right_bottom = 5.0 + 0.5 * torch.randn((each_num, 1))
@@ -67,8 +68,8 @@ np.random.seed(seed)
 num_data = int(10000)
 data_sampler = generate_data(num_data, device)
 
-state_dim = 2
-action_dim = 2
+state_dim = 2  # (x,y)
+action_dim = 2  # (x,y)
 max_action = 1.0
 
 discount = 0.99
@@ -88,7 +89,7 @@ iterations = int(num_data / batch_size)
 img_dir = f'toy_imgs/{args.dir}'
 os.makedirs(img_dir, exist_ok=True)
 
-num_eval = 100
+num_eval = 100  # 评估的次数
 
 fig, axs = plt.subplots(1, 5, figsize=(5.5 * 5, 5))
 axis_lim = 1.1
@@ -125,12 +126,12 @@ agent = QL_MLE(state_dim=state_dim,
                lr=lr,
                r_fun=None)
 
-for i in range(1, num_epochs + 1):
-
+for i in trange(1, num_epochs + 1, desc="TD3+BC Training"):
+# for i in range(1, num_epochs + 1):
     agent.train(data_sampler, iterations=iterations, batch_size=batch_size)
 
-    if i % 100 == 0:
-        print(f'QL-MLE Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'QL-MLE Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = agent.actor.sample(new_state)
@@ -155,12 +156,12 @@ agent = QL_CVAE(state_dim=state_dim,
                 lr=lr,
                 r_fun=None)
 
-for i in range(1, num_epochs + 1):
-
+for i in trange(1, num_epochs + 1, desc="BCQ Training"):
+# for i in range(1, num_epochs + 1):
     agent.train(data_sampler, iterations=iterations, batch_size=batch_size)
 
-    if i % 100 == 0:
-        print(f'QL-CVAE Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'QL-CVAE Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = agent.vae.sample(new_state)
@@ -185,12 +186,13 @@ agent = QL_MMD(state_dim=state_dim,
                lr=lr,
                r_fun=None)
 
-for i in range(1, num_epochs + 1):
+for i in trange(1, num_epochs + 1, desc="BEAR-MMD Training"):
+# for i in range(1, num_epochs + 1):
 
     agent.train(data_sampler, iterations=iterations, batch_size=batch_size)
 
-    if i % 100 == 0:
-        print(f'QL-MMD Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'QL-MMD Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = agent.actor.sample(new_state)
@@ -221,13 +223,14 @@ agent = QL_Diffusion(state_dim=state_dim,
                      r_fun=None,
                      mode=args.mode)
 
-
-for i in range(1, num_epochs+1):
-
+pbar = trange(1, num_epochs + 1, desc="QL-Diffusion Training")
+for i in pbar:
+# for i in range(1, num_epochs+1):
     b_loss, q_loss = agent.train(data_sampler, iterations=iterations, batch_size=batch_size)
 
     if i % 100 == 0:
-        print(f'QL-Diffusion Epoch: {i} B_loss {b_loss} Q_loss {q_loss}')
+        pbar.set_postfix({"B_Loss": f"{b_loss:.4f}", "Q_Loss": f"{q_loss:.4f}"})
+        # print(f'QL-Diffusion Epoch: {i} B_loss {b_loss} Q_loss {q_loss}')
 
 # fig, ax = plt.subplots()
 new_state = torch.zeros((num_eval, 2), device=device)
