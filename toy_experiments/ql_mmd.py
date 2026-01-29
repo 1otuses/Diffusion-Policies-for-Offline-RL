@@ -203,7 +203,7 @@ class QL_MMD(object):
 
         # Use lagrange multipliers on the constraint if set to auto mode
         # for the purpose of maintaing support matching at all times
-        self.lagrange_thresh = lagrange_thresh
+        self.lagrange_thresh = lagrange_thresh  # 拉格朗日乘子
         self.log_lagrange2 = torch.randn((), requires_grad=True, device=device)
         self.lagrange2_opt = torch.optim.Adam([self.log_lagrange2, ], lr=1e-3)
 

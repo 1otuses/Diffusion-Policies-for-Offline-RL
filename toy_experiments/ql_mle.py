@@ -129,7 +129,7 @@ class QL_MLE(object):
                  discount,
                  tau,
                  lr=3e-4,
-                 eta=1.0,
+                 eta=1.0,  # 用于平衡Q损失和MLE损失
                  hidden_dim=32,
                  r_fun=None,
                  ):
@@ -139,7 +139,7 @@ class QL_MLE(object):
                                     hidden_sizes=[hidden_dim, hidden_dim]).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr)
 
-        if r_fun is None:
+        if r_fun is None:  # 初始化Critic,若提供了外部奖励函数,则不需要Critic
             self.critic = Critic(state_dim, action_dim, hidden_dim=hidden_dim).to(device)
             self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
@@ -154,7 +154,7 @@ class QL_MLE(object):
     def sample_action(self, state):
         with torch.no_grad():
             state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
-            action = self.actor.sample(state, deterministic=True)
+            action = self.actor.sample(state, deterministic=True)  # 确定性策略,均值获取动作
         return action.cpu().data.numpy().flatten()
 
     def train(self, replay_buffer, iterations, batch_size=100):
