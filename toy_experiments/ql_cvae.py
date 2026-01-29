@@ -45,8 +45,8 @@ class VAE(nn.Module):
     def decode(self, state, z=None):
         # When sampling from the VAE, the latent vector is clipped to [-0.5, 0.5]
         if z is None:
-            z = torch.randn((state.shape[0], self.latent_dim)).to(self.device).clamp(-0.5, 0.5)
-
+            # z = torch.randn((state.shape[0], self.latent_dim)).to(self.device).clamp(-0.5, 0.5)
+            z = torch.randn((state.shape[0], self.latent_dim)).to(self.device)
         a = F.relu(self.d1(torch.cat([state, z], 1)))
         a = F.relu(self.d2(a))
         return self.max_action * torch.tanh(self.d3(a))
@@ -87,7 +87,7 @@ class Critic(nn.Module):
         return torch.min(q1, q2)
 
 
-class Actor(nn.Module):
+class Actor(nn.Module):  # 在VAE生成动作的基础上,加一个随机扰动
     def __init__(self, state_dim, action_dim, max_action, phi=0.05, hidden_dim=256):
         super(Actor, self).__init__()
         self.l1 = nn.Linear(state_dim + action_dim, hidden_dim)
@@ -169,8 +169,8 @@ class QL_CVAE(object):
             self.vae_optimizer.step()
 
             # Pertubation Model / Action Training
-            sampled_actions = self.vae.sample(state)
-            perturbed_actions = self.actor(state, sampled_actions)
+            sampled_actions = self.vae.sample(state)  # 从VAE中采样动作
+            perturbed_actions = self.actor(state, sampled_actions)  # 对采样动作增加扰动
             actor_loss = -self.critic.q1(state, perturbed_actions).mean()
 
             self.actor_optimizer.zero_grad()

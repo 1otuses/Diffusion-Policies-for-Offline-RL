@@ -93,7 +93,7 @@ class QL_Diffusion(object):
                  max_q_backup=False,
                  eta=1.0,
                  model_type='MLP',
-                 beta_schedule='linear',
+                 beta_schedule='linear',  # 扩散过程中的beta变化函数
                  n_timesteps=100,
                  ema_decay=0.995,
                  step_start_ema=1000,
@@ -157,12 +157,16 @@ class QL_Diffusion(object):
             bc_loss = self.actor.loss(action, state)
 
             if self.mode == 'whole_grad':
+                # 通过整个扩散链反向传播。计算量大,精准。
                 new_action = self.actor(state)
             elif self.mode == 't_middle':
+                # 全过程采样,在中间段(去噪的尾端)再开始梯度。
                 new_action = self.actor.sample_t_middle(state)
             elif self.mode == 't_last':
+                # 跳过大部分去噪阶段,只计算最后一步梯度。
                 new_action = self.actor.sample_t_last(state)
             elif self.mode == 'last_few':
+                # 全过程采样,只在最后几步进行梯度。
                 new_action = self.actor.sample_last_few(state)
 
             if self.r_fun is None:
@@ -184,7 +188,7 @@ class QL_Diffusion(object):
             self.actor_optimizer.step()
             self.actor.step_frozen()
 
-            if self.step % self.update_ema_every == 0:
+            if self.step % self.update_ema_every == 0:  # 更新EMA模型
                 self.step_ema()
 
             self.step += 1

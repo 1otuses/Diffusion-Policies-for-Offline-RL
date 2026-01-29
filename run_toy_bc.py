@@ -4,6 +4,7 @@ import numpy as np
 from torch.distributions import Normal
 import argparse
 import matplotlib.pyplot as plt
+from tqdm import tqdm, trange
 
 from toy_experiments.toy_helpers import Data_Sampler
 
@@ -18,7 +19,7 @@ def generate_data(num, device = 'cpu'):
     each_num = int(num / 4)
     pos = 0.8
     std = 0.05
-    left_up_conor = Normal(torch.tensor([-pos, pos]), torch.tensor([std, std]))
+    left_up_conor = Normal(torch.tensor([-pos, pos]), torch.tensor([std, std]))  # 在四角生成粒子集群
     left_bottom_conor = Normal(torch.tensor([-pos, -pos]), torch.tensor([std, std]))
     right_up_conor = Normal(torch.tensor([pos, pos]), torch.tensor([std, std]))
     right_bottom_conor = Normal(torch.tensor([pos, -pos]), torch.tensor([std, std]))
@@ -30,9 +31,9 @@ def generate_data(num, device = 'cpu'):
     
     data = torch.cat([left_up_samples, left_bottom_samples, right_up_samples, right_bottom_samples], dim=0)
 
-    action = data
+    action = data  # 整个数据(粒子)表示采取的动作空间
     state = torch.zeros_like(action)
-    reward = torch.zeros((num, 1))
+    reward = torch.zeros((num, 1))  # 奖励都设为1,模拟多模态策略,也就是相同状态下,采用不同的策略奖励是相同的
     return Data_Sampler(state, action, reward, device)
 
 torch.manual_seed(seed)
@@ -61,10 +62,10 @@ iterations = int(num_data / batch_size)
 
 img_dir = 'toy_imgs/bc'
 os.makedirs(img_dir, exist_ok=True)
-fig, axs = plt.subplots(1, 5, figsize=(5.5 * 5, 5))
+fig, axs = plt.subplots(1, 5, figsize=(5.5 * 5, 5))  # 一行五列图
 axis_lim = 1.1
 
-# Plot the ground truth
+# Plot the ground truth  生成真实数据分布
 num_eval = 1000
 _, action_samples, _ = data_sampler.sample(num_eval)
 action_samples = action_samples.cpu().numpy()
@@ -87,15 +88,15 @@ mle_agent = MLE_Agent(state_dim=state_dim,
                       lr=lr,
                       hidden_dim=hidden_dim)
 
-
-for i in range(num_epochs):
+for i in trange(1, num_epochs + 1, desc="MLE BC Training"):
+# for i in range(num_epochs):
     
     mle_agent.train(data_sampler,
                     iterations=iterations,
                     batch_size=batch_size)
     
-    if i % 100 == 0:
-        print(f'Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = mle_agent.actor.sample(new_state)
@@ -119,15 +120,15 @@ cvae_agent = CVAE_Agent(state_dim=state_dim,
                         lr=lr,
                         hidden_dim=hidden_dim)
 
-
-for i in range(num_epochs):
+for i in trange(1, num_epochs + 1, desc="BC CVAE Training"):
+# for i in range(num_epochs):
     
     cvae_agent.train(data_sampler,
                      iterations=iterations,
                      batch_size=batch_size)
     
-    if i % 100 == 0:
-        print(f'Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = cvae_agent.vae.sample(new_state)
@@ -140,7 +141,7 @@ axs[2].set_ylabel('y', fontsize=20)
 axs[2].set_title('BC-CVAE', fontsize=25)
 
 
-# Plot CVAE BC
+# Plot MMD BC
 from toy_experiments.bc_mmd import BC_MMD as MMD_Agent
 
 mmd_agent =  MMD_Agent(state_dim=state_dim,
@@ -152,14 +153,15 @@ mmd_agent =  MMD_Agent(state_dim=state_dim,
                        lr=lr,
                        hidden_dim=hidden_dim)
 
-for i in range(num_epochs):
+for i in trange(1, num_epochs + 1, desc="BC MMD Training"):
+# for i in range(num_epochs):
 
     mmd_agent.train(data_sampler,
                     iterations=iterations,
                     batch_size=batch_size)
 
-    if i % 100 == 0:
-        print(f'Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = mmd_agent.actor.sample(new_state)
@@ -186,14 +188,15 @@ diffusion_agent = Diffusion_Agent(state_dim=state_dim,
                                   hidden_dim=hidden_dim,
                                   lr=lr)
 
-for i in range(num_epochs):
+for i in trange(1, num_epochs + 1, desc="BC Diffusion Training"):
+# for i in range(num_epochs):
     
     diffusion_agent.train(data_sampler,
                           iterations=iterations,
                           batch_size=batch_size)
     
-    if i % 100 == 0:
-        print(f'Epoch: {i}')
+    # if i % 100 == 0:
+    #     print(f'Epoch: {i}')
 
 new_state = torch.zeros((num_eval, 2), device=device)
 new_action = diffusion_agent.actor.sample(new_state)
@@ -207,6 +210,5 @@ axs[4].set_title('BC-Diffusion', fontsize=25)
 
 fig.tight_layout()
 fig.savefig(os.path.join(img_dir, f'bc_diffusion_{T}_sd{seed}.pdf'))
-
 
 

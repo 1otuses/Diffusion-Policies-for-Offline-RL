@@ -11,7 +11,7 @@ LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
 
 
-class GaussianPolicy(nn.Module):
+class GaussianPolicy(nn.Module): # 用高斯分布模拟策略
     """
     Gaussian Policy
     """
@@ -37,8 +37,8 @@ class GaussianPolicy(nn.Module):
         self.base_fc = nn.Sequential(*self.base_fc)
 
         last_hidden_size = hidden_sizes[-1]
-        self.last_fc_mean = nn.Linear(last_hidden_size, action_dim)
-        self.last_fc_log_std = nn.Linear(last_hidden_size, action_dim)
+        self.last_fc_mean = nn.Linear(last_hidden_size, action_dim)  # 输出均值
+        self.last_fc_log_std = nn.Linear(last_hidden_size, action_dim)  # 输出对数标准差
 
         self.device = device
 
@@ -46,10 +46,10 @@ class GaussianPolicy(nn.Module):
 
         h = self.base_fc(state)
         mean = self.last_fc_mean(h)
-        std = self.last_fc_log_std(h).clamp(LOG_SIG_MIN, LOG_SIG_MAX).exp()
+        std = self.last_fc_log_std(h).clamp(LOG_SIG_MIN, LOG_SIG_MAX).exp()  # 对方差进行裁剪,防止训练初期的不稳定
 
         a_normal = Normal(mean, std, self.device)
-        action = a_normal.rsample()
+        action = a_normal.rsample()  # 重参数化采样
         log_prob = a_normal.log_prob(action)
         log_prob = log_prob.sum(dim=1, keepdim=True)
 
@@ -69,7 +69,7 @@ class GaussianPolicy(nn.Module):
     def sample(self,
                state,
                reparameterize=False,
-               deterministic=False):
+               deterministic=False):  # deterministic 确定性策略：取均值
 
         h = self.base_fc(state)
         mean = self.last_fc_mean(h)
@@ -118,11 +118,11 @@ class BC_MLE(object):
     def train(self, replay_buffer, iterations, batch_size=100):
 
         for it in range(iterations):
-            # Sample replay buffer / batch
+            # Sample replay buffer / batch  从replay buffer 中采样一批(s,a,r)数据
             state, action, reward = replay_buffer.sample(batch_size)
 
             # Actor Training
-            log_pi = self.actor.log_prob(state, action)
+            log_pi = self.actor.log_prob(state, action)  # 计算动作的概率
 
             actor_loss = -log_pi.mean()
             self.actor_optimizer.zero_grad()
