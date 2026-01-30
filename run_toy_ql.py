@@ -83,7 +83,7 @@ beta_schedule = 'vp'
 # lr = 3e-4
 
 num_epochs = 1000
-batch_size = 100
+batch_size = 200
 iterations = int(num_data / batch_size)
 
 img_dir = f'toy_imgs/{args.dir}'

@@ -7,12 +7,20 @@ import numpy as np
 import os
 import torch
 import json
+from tqdm import tqdm, trange
+
+mujoco_bin_path = r"C:\Users\Administrator\.mujoco\mujoco210\bin"
+if os.path.exists(mujoco_bin_path):
+    os.add_dll_directory(mujoco_bin_path)
+    print(f"Added DLL directory: {mujoco_bin_path}")
+else:
+    print(f"WARNING: Path not found: {mujoco_bin_path}")
 
 import d4rl
 from utils import utils
 from utils.data_sampler import Data_Sampler
 from utils.logger import logger, setup_logger
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 hyperparameters = {
     'halfcheetah-medium-v2':         {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 9.0,  'top_k': 1},
@@ -39,11 +47,11 @@ hyperparameters = {
 
 def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args):
     # Load buffer
-    dataset = d4rl.qlearning_dataset(env)
+    dataset = d4rl.qlearning_dataset(env)  # 获取数据
     data_sampler = Data_Sampler(dataset, device, args.reward_tune)
     utils.print_banner('Loaded buffer')
 
-    if args.algo == 'ql':
+    if args.algo == 'ql':  # 采用QL方法
         from agents.ql_diffusion import Diffusion_QL as Agent
         agent = Agent(state_dim=state_dim,
                       action_dim=action_dim,
@@ -59,7 +67,7 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
                       lr_decay=args.lr_decay,
                       lr_maxt=args.num_epochs,
                       grad_norm=args.gn)
-    elif args.algo == 'bc':
+    elif args.algo == 'bc':  # 纯BC方法
         from agents.bc_diffusion import Diffusion_BC as Agent
         agent = Agent(state_dim=state_dim,
                       action_dim=action_dim,
@@ -79,17 +87,46 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
     training_iters = 0
     max_timesteps = args.num_epochs * args.num_steps_per_epoch
     metric = 100.
-    utils.print_banner(f"Training Start", separator="*", num_star=90)
+    utils.print_banner(f"Training Start", separator="*", num_star=90)  #  开始训练
+    pbar = tqdm(total=max_timesteps, desc="Training", unit="step", dynamic_ncols=True)
     while (training_iters < max_timesteps) and (not early_stop):
         iterations = int(args.eval_freq * args.num_steps_per_epoch)
-        loss_metric = agent.train(data_sampler,
-                                  iterations=iterations,
-                                  batch_size=args.batch_size,
-                                  log_writer=writer)
-        training_iters += iterations
+
+        chunks_per_eval = args.eval_freq
+        steps_per_chunk = args.num_steps_per_epoch
+        chunk_loss_history = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
+        for _ in range(chunks_per_eval):
+            # 每次只训练 1 个 epoch (1000步)
+            loss_metric = agent.train(data_sampler,
+                                      iterations=steps_per_chunk,
+                                      batch_size=args.batch_size,
+                                      log_writer=writer)
+            # training_iters += iterations
+            training_iters += steps_per_chunk
+            pbar.update(steps_per_chunk)
+            pbar.set_postfix({
+                'Epoch': int(training_iters // args.num_steps_per_epoch),
+                'BC': f"{np.mean(loss_metric['bc_loss']):.3f}",
+                'QL': f"{np.mean(loss_metric['ql_loss']):.3f}"
+            })
+
+            for k in chunk_loss_history.keys():
+                if k in loss_metric:
+                    chunk_loss_history[k].append(np.mean(loss_metric[k]))
+        # loss_metric = agent.train(data_sampler,
+        #                           iterations=iterations,
+        #                           batch_size=args.batch_size,
+        #                           log_writer=writer)
+        # training_iters += iterations
         curr_epoch = int(training_iters // int(args.num_steps_per_epoch))
 
-        # Logging
+        avg_bc_loss = np.mean(chunk_loss_history['bc_loss'])
+        avg_ql_loss = np.mean(chunk_loss_history['ql_loss'])
+        avg_actor_loss = np.mean(chunk_loss_history['actor_loss'])
+        avg_critic_loss = np.mean(chunk_loss_history['critic_loss'])
+
+        tqdm.write(f"Train step: {training_iters} | Epoch: {curr_epoch} | BC: {avg_bc_loss:.4f} | QL: {avg_ql_loss:.4f}")
+        # Logging  日志记录
         utils.print_banner(f"Train step: {training_iters}", separator="*", num_star=90)
         logger.record_tabular('Trained Epochs', curr_epoch)
         logger.record_tabular('BC Loss', np.mean(loss_metric['bc_loss']))
@@ -105,7 +142,7 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
                             np.mean(loss_metric['bc_loss']), np.mean(loss_metric['ql_loss']),
                             np.mean(loss_metric['actor_loss']), np.mean(loss_metric['critic_loss']),
                             curr_epoch])
-        np.save(os.path.join(output_dir, "eval"), evaluations)
+        np.save(os.path.join(output_dir, "eval"), evaluations)  # 保存评估数据
         logger.record_tabular('Average Episodic Reward', eval_res)
         logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
         logger.dump_tabular()
@@ -116,12 +153,14 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
 
         metric = bc_loss
 
-        if args.save_best_model:
+        if args.save_best_model:  # 保存最优模型
             agent.save_model(output_dir, curr_epoch)
+
+    pbar.close()
 
     # Model Selection: online or offline
     scores = np.array(evaluations)
-    if args.ms == 'online':
+    if args.ms == 'online':  # 在线:选择评估分数最高的模型
         best_id = np.argmax(scores[:, 2])
         best_res = {'model selection': args.ms, 'epoch': scores[best_id, -1],
                     'best normalized score avg': scores[best_id, 2],
@@ -130,7 +169,7 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
                     'best raw score std': scores[best_id, 1]}
         with open(os.path.join(output_dir, f"best_score_{args.ms}.txt"), 'w') as f:
             f.write(json.dumps(best_res))
-    elif args.ms == 'offline':
+    elif args.ms == 'offline':  # 离线:选择BC损失较小的模型
         bc_loss = scores[:, 4]
         top_k = min(len(bc_loss) - 1, args.top_k)
         where_k = np.argsort(bc_loss) == top_k
@@ -150,7 +189,7 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
 # A fixed seed is used for the eval environment
 def eval_policy(policy, env_name, seed, eval_episodes=10):
     eval_env = gym.make(env_name)
-    eval_env.seed(seed + 100)
+    eval_env.seed(seed + 100)  # 使用不同的随机种子进行评估
 
     scores = []
     for _ in range(eval_episodes):
@@ -178,7 +217,7 @@ if __name__ == "__main__":
     ### Experimental Setups ###
     parser.add_argument("--exp", default='exp_1', type=str)                    # Experiment ID
     parser.add_argument('--device', default=0, type=int)                       # device, {"cpu", "cuda", "cuda:0", "cuda:1"}, etc
-    parser.add_argument("--env_name", default="walker2d-medium-expert-v2", type=str)  # OpenAI gym environment name
+    parser.add_argument("--env_name", default="halfcheetah-medium-v2", type=str)  # OpenAI gym environment name
     parser.add_argument("--dir", default="results", type=str)                    # Logging directory
     parser.add_argument("--seed", default=0, type=int)                         # Sets Gym, PyTorch and Numpy seeds
     parser.add_argument("--num_steps_per_epoch", default=1000, type=int)
@@ -223,12 +262,12 @@ if __name__ == "__main__":
     args.top_k = hyperparameters[args.env_name]['top_k']
 
     # Setup Logging
-    file_name = f"{args.env_name}|{args.exp}|diffusion-{args.algo}|T-{args.T}"
-    if args.lr_decay: file_name += '|lr_decay'
-    file_name += f'|ms-{args.ms}'
+    file_name = f"{args.env_name}_{args.exp}_diffusion-{args.algo}_T-{args.T}"  # 将符号|改为_  |为Linux可行
+    if args.lr_decay: file_name += '_lr_decay'
+    file_name += f'_ms-{args.ms}'
 
-    if args.ms == 'offline': file_name += f'|k-{args.top_k}'
-    file_name += f'|{args.seed}'
+    if args.ms == 'offline': file_name += f'_k-{args.top_k}'
+    file_name += f'_{args.seed}'
 
     results_dir = os.path.join(args.output_dir, file_name)
     if not os.path.exists(results_dir):
@@ -241,7 +280,8 @@ if __name__ == "__main__":
 
     env = gym.make(args.env_name)
 
-    env.seed(args.seed)
+    # env.seed(args.seed)
+    env.reset(seed=args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 

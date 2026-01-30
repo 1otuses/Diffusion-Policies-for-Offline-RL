@@ -41,9 +41,9 @@ requests==2.28.0
 scipy==1.8.1
 six==1.16.0
 termcolor==1.1.0
-# torch==1.10.1+cu111
-# torchaudio==0.10.1+rocm4.1
-# torchvision==0.11.2+cu111
+# torch==1.10.1+cu111      torch==2.7.1+cu128
+# torchaudio==0.10.1+rocm4.1    torchaudio==2.7.1+cu128
+# torchvision==0.11.2+cu111     torchvision==0.22.1+cu128
 tqdm==4.64.0
 typing_extensions==4.2.0
 urllib3==1.26.9
