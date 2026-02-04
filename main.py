@@ -166,48 +166,52 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
 
             # Model saving strategy: only save best or top-k if requested
             if args.save_best_model:
-                strategy = getattr(args, 'save_model_strategy', 'best')
-                if strategy == 'every':
-                    # legacy behavior: save every evaluation
-                    agent.save_model(output_dir, curr_epoch)
-                    if args.save_model_freq and (curr_epoch % args.save_model_freq == 0):
+                if args.ms == 'online':
+                    if not hasattr(train_agent, '_online_best_score'):
+                        train_agent._online_best_score = -float('inf')  # 初始化最佳分数负无穷
+                        train_agent._online_best_epoch = -1  # 初始化最佳epoch
+                    if eval_norm_res > train_agent._online_best_score:  # 判断当前分数
+                        if train_agent._online_best_epoch != -1:
+                            for name in [f'actor_{train_agent._online_best_epoch}.pth', f'critic_{train_agent._online_best_epoch}.pth']:
+                                path = os.path.join(output_dir, name)
+                                try:
+                                    if os.path.exists(path): os.remove(path)  # 用当前最佳模型替换之前的最佳模型
+                                except Exception: pass
+
+                        train_agent._online_best_score = eval_norm_res
+                        train_agent._online_best_epoch = curr_epoch
+
                         agent.save_model(output_dir, curr_epoch)
-                elif strategy == 'best':
-                    # keep best (lowest) BC loss only
-                    if not hasattr(train_agent, '_best_bc_loss'):
-                        train_agent._best_bc_loss = float('inf')
-                    if bc_loss < train_agent._best_bc_loss:
-                        train_agent._best_bc_loss = bc_loss
-                        agent.save_model(output_dir, curr_epoch)
-                elif strategy == 'top_k':
-                    # keep top-k epochs with lowest BC loss
-                    k = max(1, getattr(args, 'save_model_top_k', 1))
-                    if not hasattr(train_agent, '_top_k_list'):
-                        train_agent._top_k_list = []  # list of tuples (loss, epoch)
-                    # update or append current
+
+                elif args.ms == 'offline':
+                    current_loss = bc_loss
+                    save_limit = args.top_k + 1  # 多保存一个以便比较
+                    if not hasattr(train_agent, '_offline_top_k_losses'):
+                        train_agent._offline_top_k_losses = [] # 存储格式: (loss, epoch)
+                    
                     found = False
-                    for i, (l, eid) in enumerate(train_agent._top_k_list):
+                    for i, (l, eid) in enumerate(train_agent._offline_top_k_losses):
                         if eid == curr_epoch:
-                            train_agent._top_k_list[i] = (bc_loss, curr_epoch)
+                            train_agent._offline_top_k_losses[i] = (current_loss, curr_epoch)
                             found = True
                             break
                     if not found:
-                        train_agent._top_k_list.append((bc_loss, curr_epoch))
-                    # sort ascending by loss
-                    train_agent._top_k_list.sort(key=lambda x: x[0])
-                    # save current if it's in top-k
-                    if any(eid == curr_epoch for _, eid in train_agent._top_k_list[:k]):
+                        train_agent._offline_top_k_losses.append((current_loss, curr_epoch))
+
+                    train_agent._offline_top_k_losses.sort(key=lambda x: x[0])
+                    top_k_candidates = train_agent._offline_top_k_losses[:save_limit]  # 取前k个最小loss
+
+                    if any(eid == curr_epoch for _, eid in top_k_candidates):
                         agent.save_model(output_dir, curr_epoch)
-                    # remove excess saved models (worst ones)
-                    while len(train_agent._top_k_list) > k:
-                        bad_loss, bad_epoch = train_agent._top_k_list.pop()
+
+                    # 4. 清理掉跌出 Top-K 的废弃模型
+                    while len(train_agent._offline_top_k_losses) > save_limit:
+                        bad_loss, bad_epoch = train_agent._offline_top_k_losses.pop() # 弹出列表末尾(Loss最大的)
                         for name in [f'actor_{bad_epoch}.pth', f'critic_{bad_epoch}.pth']:
                             path = os.path.join(output_dir, name)
                             try:
-                                if os.path.exists(path):
-                                    os.remove(path)
-                            except Exception:
-                                pass
+                                if os.path.exists(path): os.remove(path)
+                            except OSError: pass
 
     # Model Selection: online or offline
     scores = np.array(evaluations)
@@ -278,11 +282,6 @@ if __name__ == "__main__":
     parser.add_argument("--lr_decay", action='store_true')    # action表示布尔值参数
     parser.add_argument('--early_stop', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
-    parser.add_argument('--save_model_freq', default=0, type=int,
-                        help='Save model every N epochs (0 disables).')
-    parser.add_argument('--save_model_strategy', default='best', choices=['best', 'top_k', 'every'],
-                        help="Saving strategy when --save_best_model is set: 'best' (default), 'top_k', or 'every'.")
-    parser.add_argument('--save_model_top_k', default=1, type=int, help='Top K saved models to keep when save_model_strategy=top_k')
 
     ### RL Parameters ###
     parser.add_argument("--discount", default=0.99, type=float)
