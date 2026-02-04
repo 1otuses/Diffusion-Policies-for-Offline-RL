@@ -9,12 +9,12 @@ import torch
 import json
 from tqdm import tqdm, trange
 
-mujoco_bin_path = r"C:\Users\Administrator\.mujoco\mujoco210\bin"
-if os.path.exists(mujoco_bin_path):
-    os.add_dll_directory(mujoco_bin_path)
-    print(f"Added DLL directory: {mujoco_bin_path}")
-else:
-    print(f"WARNING: Path not found: {mujoco_bin_path}")
+# mujoco_bin_path = r"C:\Users\Administrator\.mujoco\mujoco210\bin"  # Windows下添加MuJoCo的bin目录
+# if os.path.exists(mujoco_bin_path):
+#     os.add_dll_directory(mujoco_bin_path)
+#     print(f"Added DLL directory: {mujoco_bin_path}")
+# else:
+#     print(f"WARNING: Path not found: {mujoco_bin_path}")
 
 import d4rl
 from utils import utils
@@ -23,10 +23,10 @@ from utils.logger import logger, setup_logger
 # from torch.utils.tensorboard import SummaryWriter
 
 hyperparameters = {
-    'halfcheetah-medium-v2':         {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 9.0,  'top_k': 1},
+    'halfcheetah-medium-v2':         {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 10, 'num_epochs': 50, 'gn': 9.0,  'top_k': 1},
     'hopper-medium-v2':              {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 9.0,  'top_k': 2},
     'walker2d-medium-v2':            {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 1.0,  'top_k': 1},
-    'halfcheetah-medium-replay-v2':  {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 2.0,  'top_k': 0},
+    'halfcheetah-medium-replay-v2':  {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 10, 'num_epochs': 50, 'gn': 2.0,  'top_k': 0},
     'hopper-medium-replay-v2':       {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 4.0,  'top_k': 2},
     'walker2d-medium-replay-v2':     {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 4.0,  'top_k': 1},
     'halfcheetah-medium-expert-v2':  {'lr': 3e-4, 'eta': 1.0,   'max_q_backup': False,  'reward_tune': 'no',          'eval_freq': 50, 'num_epochs': 2000, 'gn': 7.0,  'top_k': 0},
@@ -48,7 +48,7 @@ hyperparameters = {
 def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args):
     # Load buffer
     dataset = d4rl.qlearning_dataset(env)  # 获取数据
-    data_sampler = Data_Sampler(dataset, device, args.reward_tune)
+    data_sampler = Data_Sampler(dataset, device, args.reward_tune)  # 创建数据采样器
     utils.print_banner('Loaded buffer')
 
     if args.algo == 'ql':  # 采用QL方法
@@ -79,84 +79,135 @@ def train_agent(env, state_dim, action_dim, max_action, device, output_dir, args
                       n_timesteps=args.T,
                       lr=args.lr)
 
-    early_stop = False
-    stop_check = utils.EarlyStopping(tolerance=1, min_delta=0.)
+    early_stop = False  # 是否提前停止训练
+    stop_check = utils.EarlyStopping(tolerance=1, min_delta=0.)  # 提前停止判定
     writer = None  # SummaryWriter(output_dir)
 
     evaluations = []
-    training_iters = 0
-    max_timesteps = args.num_epochs * args.num_steps_per_epoch
-    metric = 100.
+    training_iters = 0  # 训练步数
+    # num_epochs 表示训练批次
+    max_timesteps = args.num_epochs * args.num_steps_per_epoch  # 最大训练步数
+    metric = 100.  
     utils.print_banner(f"Training Start", separator="*", num_star=90)  #  开始训练
-    pbar = tqdm(total=max_timesteps, desc="Training", unit="step", dynamic_ncols=True)
-    while (training_iters < max_timesteps) and (not early_stop):
-        iterations = int(args.eval_freq * args.num_steps_per_epoch)
 
-        chunks_per_eval = args.eval_freq
-        steps_per_chunk = args.num_steps_per_epoch
-        chunk_loss_history = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
-        for _ in range(chunks_per_eval):
-            # 每次只训练 1 个 epoch (1000步)
-            loss_metric = agent.train(data_sampler,
+    with tqdm(total=max_timesteps, desc="Training", unit="step", dynamic_ncols=True) as pbar:
+        while (training_iters < max_timesteps) and (not early_stop):
+            # eval_freq: 每多少个epoch评估一次
+            chunks_per_eval = args.eval_freq  # epoch分割成若干评估块
+            steps_per_chunk = args.num_steps_per_epoch  # 每个评估块的步数
+
+            chunk_loss_history = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
+            # 保存每个chunk的loss
+            for _ in range(chunks_per_eval):
+                # 每次只训练 1 个 epoch (1000步)
+                loss_metric = agent.train(data_sampler,
                                       iterations=steps_per_chunk,
                                       batch_size=args.batch_size,
                                       log_writer=writer)
             # training_iters += iterations
-            training_iters += steps_per_chunk
-            pbar.update(steps_per_chunk)
-            pbar.set_postfix({
-                'Epoch': int(training_iters // args.num_steps_per_epoch),
-                'BC': f"{np.mean(loss_metric['bc_loss']):.3f}",
-                'QL': f"{np.mean(loss_metric['ql_loss']):.3f}"
-            })
+                training_iters += steps_per_chunk
+                pbar.update(steps_per_chunk)
 
-            for k in chunk_loss_history.keys():
-                if k in loss_metric:
-                    chunk_loss_history[k].append(np.mean(loss_metric[k]))
-        # loss_metric = agent.train(data_sampler,
-        #                           iterations=iterations,
-        #                           batch_size=args.batch_size,
-        #                           log_writer=writer)
-        # training_iters += iterations
-        curr_epoch = int(training_iters // int(args.num_steps_per_epoch))
+                for k in chunk_loss_history.keys():
+                    if k in loss_metric:
+                        chunk_loss_history[k].append(np.mean(loss_metric[k]))
 
-        avg_bc_loss = np.mean(chunk_loss_history['bc_loss'])
-        avg_ql_loss = np.mean(chunk_loss_history['ql_loss'])
-        avg_actor_loss = np.mean(chunk_loss_history['actor_loss'])
-        avg_critic_loss = np.mean(chunk_loss_history['critic_loss'])
+                pbar.set_postfix({  # 更新进度条
+                    'Epoch': int(training_iters // args.num_steps_per_epoch),
+                    'BC': f"{np.mean(loss_metric.get('bc_loss', 0)):.3f}",
+                    'QL': f"{np.mean(loss_metric.get('ql_loss', 0)):.3f}",
+                    'Actor': f"{np.mean(loss_metric.get('actor_loss', 0)):.3f}",
+                    'Critic': f"{np.mean(loss_metric.get('critic_loss', 0)):.3f}",
+                })
+            # loss_metric = agent.train(data_sampler,
+            #                           iterations=iterations,
+            #                           batch_size=args.batch_size,
+            #                           log_writer=writer)
+            # training_iters += iterations
+            curr_epoch = int(training_iters // int(args.num_steps_per_epoch))
 
-        tqdm.write(f"Train step: {training_iters} | Epoch: {curr_epoch} | BC: {avg_bc_loss:.4f} | QL: {avg_ql_loss:.4f}")
-        # Logging  日志记录
-        utils.print_banner(f"Train step: {training_iters}", separator="*", num_star=90)
-        logger.record_tabular('Trained Epochs', curr_epoch)
-        logger.record_tabular('BC Loss', np.mean(loss_metric['bc_loss']))
-        logger.record_tabular('QL Loss', np.mean(loss_metric['ql_loss']))
-        logger.record_tabular('Actor Loss', np.mean(loss_metric['actor_loss']))
-        logger.record_tabular('Critic Loss', np.mean(loss_metric['critic_loss']))
-        logger.dump_tabular()
+            # 计算平均loss
+            avg_losses = {k: np.mean(v) if v else 0.0 for k, v in chunk_loss_history.items()}
 
-        # Evaluation
-        eval_res, eval_res_std, eval_norm_res, eval_norm_res_std = eval_policy(agent, args.env_name, args.seed,
+            # avg_bc_loss = np.mean(chunk_loss_history['bc_loss'])
+            # avg_ql_loss = np.mean(chunk_loss_history['ql_loss'])
+            # avg_actor_loss = np.mean(chunk_loss_history['actor_loss'])
+            # avg_critic_loss = np.mean(chunk_loss_history['critic_loss'])
+
+            tqdm.write(f"Train step: {training_iters} | Epoch: {curr_epoch} | BC: {avg_losses['bc_loss']:.4f} | QL: {avg_losses['ql_loss']:.4f}")
+            # Logging  日志记录每 评估块
+            utils.print_banner(f"Train step: {training_iters}", separator="*", num_star=90)
+            logger.record_tabular('Trained Epochs', curr_epoch)
+            logger.record_tabular('BC Loss', avg_losses['bc_loss'])
+            logger.record_tabular('QL Loss', avg_losses['ql_loss'])
+            logger.record_tabular('Actor Loss', avg_losses['actor_loss'])
+            logger.record_tabular('Critic Loss', avg_losses['critic_loss'])
+            logger.dump_tabular()
+
+            # Evaluation
+            eval_res, eval_res_std, eval_norm_res, eval_norm_res_std = eval_policy(agent, args.env_name, args.seed,
                                                                                eval_episodes=args.eval_episodes)
-        evaluations.append([eval_res, eval_res_std, eval_norm_res, eval_norm_res_std,
-                            np.mean(loss_metric['bc_loss']), np.mean(loss_metric['ql_loss']),
-                            np.mean(loss_metric['actor_loss']), np.mean(loss_metric['critic_loss']),
+            # eval_res: 平均回报, eval_res_std: 回报标准差, eval_norm_res: 平均归一化回报, eval_norm_res_std: 归一化回报标准差
+            # 保存平均Loss而不是每次的Loss
+            evaluations.append([eval_res, eval_res_std, eval_norm_res, eval_norm_res_std,
+                            avg_losses['bc_loss'], avg_losses['ql_loss'],
+                            avg_losses['actor_loss'], avg_losses['critic_loss'],
                             curr_epoch])
-        np.save(os.path.join(output_dir, "eval"), evaluations)  # 保存评估数据
-        logger.record_tabular('Average Episodic Reward', eval_res)
-        logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
-        logger.dump_tabular()
+            np.save(os.path.join(output_dir, "eval"), evaluations)  # 保存评估数据
+            logger.record_tabular('Average Episodic Reward', eval_res)
+            logger.record_tabular('Average Episodic N-Reward', eval_norm_res)
+            logger.dump_tabular()
 
-        bc_loss = np.mean(loss_metric['bc_loss'])
-        if args.early_stop:
-            early_stop = stop_check(metric, bc_loss)
+            bc_loss = np.mean(loss_metric['bc_loss'])
+            if args.early_stop:
+                early_stop = stop_check(metric, bc_loss)
 
-        metric = bc_loss
+            metric = bc_loss
 
-        if args.save_best_model:  # 保存最优模型
-            agent.save_model(output_dir, curr_epoch)
-
-    pbar.close()
+            # Model saving strategy: only save best or top-k if requested
+            if args.save_best_model:
+                strategy = getattr(args, 'save_model_strategy', 'best')
+                if strategy == 'every':
+                    # legacy behavior: save every evaluation
+                    agent.save_model(output_dir, curr_epoch)
+                    if args.save_model_freq and (curr_epoch % args.save_model_freq == 0):
+                        agent.save_model(output_dir, curr_epoch)
+                elif strategy == 'best':
+                    # keep best (lowest) BC loss only
+                    if not hasattr(train_agent, '_best_bc_loss'):
+                        train_agent._best_bc_loss = float('inf')
+                    if bc_loss < train_agent._best_bc_loss:
+                        train_agent._best_bc_loss = bc_loss
+                        agent.save_model(output_dir, curr_epoch)
+                elif strategy == 'top_k':
+                    # keep top-k epochs with lowest BC loss
+                    k = max(1, getattr(args, 'save_model_top_k', 1))
+                    if not hasattr(train_agent, '_top_k_list'):
+                        train_agent._top_k_list = []  # list of tuples (loss, epoch)
+                    # update or append current
+                    found = False
+                    for i, (l, eid) in enumerate(train_agent._top_k_list):
+                        if eid == curr_epoch:
+                            train_agent._top_k_list[i] = (bc_loss, curr_epoch)
+                            found = True
+                            break
+                    if not found:
+                        train_agent._top_k_list.append((bc_loss, curr_epoch))
+                    # sort ascending by loss
+                    train_agent._top_k_list.sort(key=lambda x: x[0])
+                    # save current if it's in top-k
+                    if any(eid == curr_epoch for _, eid in train_agent._top_k_list[:k]):
+                        agent.save_model(output_dir, curr_epoch)
+                    # remove excess saved models (worst ones)
+                    while len(train_agent._top_k_list) > k:
+                        bad_loss, bad_epoch = train_agent._top_k_list.pop()
+                        for name in [f'actor_{bad_epoch}.pth', f'critic_{bad_epoch}.pth']:
+                            path = os.path.join(output_dir, name)
+                            try:
+                                if os.path.exists(path):
+                                    os.remove(path)
+                            except Exception:
+                                pass
 
     # Model Selection: online or offline
     scores = np.array(evaluations)
@@ -224,9 +275,14 @@ if __name__ == "__main__":
 
     ### Optimization Setups ###
     parser.add_argument("--batch_size", default=256, type=int)
-    parser.add_argument("--lr_decay", action='store_true')
+    parser.add_argument("--lr_decay", action='store_true')    # action表示布尔值参数
     parser.add_argument('--early_stop', action='store_true')
     parser.add_argument('--save_best_model', action='store_true')
+    parser.add_argument('--save_model_freq', default=0, type=int,
+                        help='Save model every N epochs (0 disables).')
+    parser.add_argument('--save_model_strategy', default='best', choices=['best', 'top_k', 'every'],
+                        help="Saving strategy when --save_best_model is set: 'best' (default), 'top_k', or 'every'.")
+    parser.add_argument('--save_model_top_k', default=1, type=int, help='Top K saved models to keep when save_model_strategy=top_k')
 
     ### RL Parameters ###
     parser.add_argument("--discount", default=0.99, type=float)
@@ -262,12 +318,13 @@ if __name__ == "__main__":
     args.top_k = hyperparameters[args.env_name]['top_k']
 
     # Setup Logging
-    file_name = f"{args.env_name}_{args.exp}_diffusion-{args.algo}_T-{args.T}"  # 将符号|改为_  |为Linux可行
-    if args.lr_decay: file_name += '_lr_decay'
-    file_name += f'_ms-{args.ms}'
+    file_name = f"{args.env_name}|{args.exp}|diffusion-{args.algo}|T-{args.T}"  # 将符号|改为_  |为Linux可行
+    if args.lr_decay: file_name += '|lr_decay'
+    file_name += f'|ms-{args.ms}'
 
-    if args.ms == 'offline': file_name += f'_k-{args.top_k}'
-    file_name += f'_{args.seed}'
+    if args.ms == 'offline': file_name += f'|k-{args.top_k}'
+    # top_k: 用于离线模型选择时选择前k个模型
+    file_name += f'|{args.seed}'
 
     results_dir = os.path.join(args.output_dir, file_name)
     if not os.path.exists(results_dir):
@@ -292,7 +349,8 @@ if __name__ == "__main__":
     variant.update(state_dim=state_dim)
     variant.update(action_dim=action_dim)
     variant.update(max_action=max_action)
-    setup_logger(os.path.basename(results_dir), variant=variant, log_dir=results_dir)
+    setup_logger(os.path.basename(results_dir), variant=variant, log_dir=results_dir)  # 设置日志记录器
+    # 保存的路径：results/{env_name}|{exp}|diffusion-{algo}|T-{T}|ms-{ms}|k-{top_k}|seed/logger_data.txt
     utils.print_banner(f"Env: {args.env_name}, state_dim: {state_dim}, action_dim: {action_dim}")
 
     train_agent(env,

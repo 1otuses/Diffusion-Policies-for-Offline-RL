@@ -211,4 +211,3 @@ axs[4].set_title('BC-Diffusion', fontsize=25)
 fig.tight_layout()
 fig.savefig(os.path.join(img_dir, f'bc_diffusion_{T}_sd{seed}.pdf'))
 
-
